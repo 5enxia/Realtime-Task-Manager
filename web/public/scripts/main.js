@@ -49,37 +49,21 @@ function isUserSignedIn() {
   return !!firebase.auth().currentUser;
 }
 
+
 // Saves a new message on the Cloud Firestore.
 function saveMessage(messageText) {
   // Add a new message entry to the Firebase database.
   return firebase.firestore().collection('messages').add({
     name: getUserName(),
-    text: messageText,
-    profilePicUrl: getProfilePicUrl(),
+    student: messageText,
+    tasa: '',
+    waiting: true,
     timestamp: firebase.firestore.FieldValue.serverTimestamp()
   }).catch(function(error) {
     console.error('Error writing new message to Firebase Database', error);
   });
 }
 
-// Loads chat messages history and listens for upcoming ones.
-function loadMessages() {
-  // Create the query to load the last 12 messages and listen for new ones.
-  var query = firebase.firestore().collection('messages').orderBy('timestamp', 'desc').limit(12);
-  
-  // Start listening to the query.
-  query.onSnapshot(function(snapshot) {
-    snapshot.docChanges().forEach(function(change) {
-      if (change.type === 'removed') {
-        deleteMessage(change.doc.id);
-      } else {
-        var message = change.doc.data();
-        displayMessage(change.doc.id, message.timestamp, message.name,
-                      message.text, message.profilePicUrl, message.imageUrl);
-      }
-    });
-  });
-}
 
 // Saves a new message containing an image in Firebase.
 // This first saves the image in Firebase storage.
@@ -107,6 +91,7 @@ function saveImageMessage(file) {
     console.error('There was an error uploading a file to Cloud Storage:', error);
   });
 }
+
 
 // Saves the messaging device token to the datastore.
 function saveMessagingDeviceToken() {
@@ -226,14 +211,6 @@ function resetMaterialTextfield(element) {
   element.parentNode.MaterialTextfield.boundUpdateClassesHandler();
 }
 
-// Template for messages.
-var MESSAGE_TEMPLATE =
-    '<div class="message-container">' +
-      '<div class="spacing"><div class="pic"></div></div>' +
-      '<div class="message"></div>' +
-      '<div class="name"></div>' +
-    '</div>';
-
 // Adds a size to Google Profile pics URLs.
 function addSizeToGoogleProfilePic(url) {
   if (url.indexOf('googleusercontent.com') !== -1 && url.indexOf('?') === -1) {
@@ -245,18 +222,41 @@ function addSizeToGoogleProfilePic(url) {
 // A loading image URL.
 var LOADING_IMAGE_URL = 'https://www.google.com/images/spin-32.gif?a';
 
-// Delete a Message from the UI.
-function deleteMessage(id) {
-  var div = document.getElementById(id);
-  // If an element for that message exists we delete it.
-  if (div) {
-    div.parentNode.removeChild(div);
-  }
+// Loads chat messages history and listens for upcoming ones.
+function loadMessages() {
+  // Create the query to load the last 50 messages and listen for new ones.
+  var query = firebase.firestore().collection('messages').orderBy('timestamp', 'desc').limit(50);
+  // Start listening to the query.
+  query.onSnapshot(function(snapshot) {
+    snapshot.docChanges().forEach(function(change) {
+      if (change.type === 'removed') {
+        deleteMessage(change.doc.id);
+      // }else if(change.type === 'modified'){
+      //   updateMessage(change.doc.id);
+      }else {
+        var message = change.doc.data();
+        displayMessage(change.doc.id, message.timestamp, message.student, message.waiting, message.tasa);
+      }
+    });
+  });
 }
+
+// Template for messages.
+// waiting
+var WAITING_TEMPLATE =
+    '<div class="message-container">' +
+      '<div class="message"></div>' +
+      '<button class="cancel mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect mdl-button--accent">取消</button>' +
+      '<button class="getwork mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect mdl-button--colerd">対応する</button>' +
+    '</div>'
+
+// waiting
+var WORKING_TEMPLATE = '<button class="cancel mdl-button mdl-js-button mdl-button--raised mdl-js-ripple-effect mdl-button--accent">完了</button>' 
 
 function createAndInsertMessage(id, timestamp) {
   const container = document.createElement('div');
-  container.innerHTML = MESSAGE_TEMPLATE;
+  container.innerHTML = WAITING_TEMPLATE;
+
   const div = container.firstChild;
   div.setAttribute('id', id);
 
@@ -287,42 +287,82 @@ function createAndInsertMessage(id, timestamp) {
 
       messageListNode = messageListNode.nextSibling;
     }
-
     messageListElement.insertBefore(div, messageListNode);
   }
 
   return div;
 }
 
-// Displays a Message in the UI.
-function displayMessage(id, timestamp, name, text, picUrl, imageUrl) {
-  var div = document.getElementById(id) || createAndInsertMessage(id, timestamp);
-
-  // profile picture
-  if (picUrl) {
-    div.querySelector('.pic').style.backgroundImage = 'url(' + addSizeToGoogleProfilePic(picUrl) + ')';
+// Delete a Message from the UI.
+function deleteMessage(id) {
+  var div = document.getElementById(id);
+  // If an element for that message exists we delete it.
+  if (div) {
+    div.parentNode.removeChild(div);
   }
+}
 
-  div.querySelector('.name').textContent = name;
+// Upate a Message from the UI
+function updateMessage(div){
+  var tmp = div;
+  // If an element for that message exists we update it.
+  if(div){
+    div.parentNode.removeChild(div);
+    var children = tmp.getElementsByClassName('getwork');
+    tmp.removeChild(children[0]);
+    children = tmp.getElementsByClassName('cancel');
+    children[0].textContent = '完了';
+    workingListElement.appendChild(tmp);
+  }
+}
+
+// Displays a Message in the UI.
+function displayMessage(id, timestamp, name, waiting, tasa) {
+  var div = document.getElementById(id) || createAndInsertMessage(id, timestamp);
   var messageElement = div.querySelector('.message');
 
-  if (text) { // If the message is text.
-    messageElement.textContent = text;
-    // Replace all line breaks by <br>.
-    messageElement.innerHTML = messageElement.innerHTML.replace(/\n/g, '<br>');
-  } else if (imageUrl) { // If the message is an image.
-    var image = document.createElement('img');
-    image.addEventListener('load', function() {
-      messageListElement.scrollTop = messageListElement.scrollHeight;
-    });
-    image.src = imageUrl + '&' + new Date().getTime();
-    messageElement.innerHTML = '';
-    messageElement.appendChild(image);
+  if (name) { // If the message is text.
+    messageElement.textContent = name;
   }
+  if(tasa.length > 0){
+    messageElement.textContent += '\t対応者:' + tasa; 
+  }
+  
+  // Add EventLisners
+  // 取消ボタン
+  var cancleButton = div.querySelector('.cancel');
+  cancleButton.addEventListener("click", function() {cancelMessage(id);},false); 
+
+  if(waiting){
+    // 対応ボタン
+    var getWorkButton = div.querySelector('.getwork');
+    getWorkButton.addEventListener("click", function() {getWork(id, name);}, false);
+  }else{
+    updateMessage(div);
+  }
+
   // Show the card fading-in and scroll to view the new message.
   setTimeout(function() {div.classList.add('visible')}, 1);
   messageListElement.scrollTop = messageListElement.scrollHeight;
   messageInputElement.focus();
+}
+
+// 取消ボタンのコールバック関数
+function cancelMessage(id){
+  return firebase.firestore().collection('messages').doc(id).delete().then(function() {
+    console.log("Document successfully deleted!");
+  }).catch(function(error) {
+    console.error("Error removing document: ", error);
+  });
+}
+
+// 対応ボタンのコールバック関数
+function getWork(id, messageText) {
+  return firebase.firestore().collection("messages").doc(id).update({
+     tasa: getUserName(),
+     waiting: false,
+    }
+  );
 }
 
 // Enables or disables the submit button depending on the values of the input
@@ -348,14 +388,20 @@ function checkSetup() {
 checkSetup();
 
 // Shortcuts to DOM Elements.
+//　waiting list
 var messageListElement = document.getElementById('messages');
 var messageFormElement = document.getElementById('message-form');
 var messageInputElement = document.getElementById('message');
 var submitButtonElement = document.getElementById('submit');
+// working list
+var workingListElement = document.getElementById('workings');
+
+
 var imageButtonElement = document.getElementById('submitImage');
 var imageFormElement = document.getElementById('image-form');
 var mediaCaptureElement = document.getElementById('mediaCapture');
 var userPicElement = document.getElementById('user-pic');
+
 var userNameElement = document.getElementById('user-name');
 var signInButtonElement = document.getElementById('sign-in');
 var signOutButtonElement = document.getElementById('sign-out');
@@ -370,12 +416,6 @@ signInButtonElement.addEventListener('click', signIn);
 messageInputElement.addEventListener('keyup', toggleButton);
 messageInputElement.addEventListener('change', toggleButton);
 
-// Events for image upload.
-imageButtonElement.addEventListener('click', function(e) {
-  e.preventDefault();
-  mediaCaptureElement.click();
-});
-mediaCaptureElement.addEventListener('change', onMediaFileSelected);
 
 // initialize Firebase
 initFirebaseAuth();
